@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model User {
+  id        String  @id @default(cuid())
+  role      Role    @default(USER)
+  name      String
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  news      News[]
+  gamesNews GamesNews[]
+
+  @@map("users")
+}
+
+model MainSection {
+  id        Int      @id @default(autoincrement())
+  title     String?
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  files     File[]
+
+  @@map("main_sections")
+}
+
+model News {
+  id         Int      @id @default(autoincrement())
+  title      String
+  content    String   @db.Text
+  publishedAt DateTime @map("published_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  authorId   String
+  author     User     @relation(fields: [authorId], references: [id])
+  files      File[]
+
+  @@map("news")
+}
+
+model GamesNews {
+  id          Int      @id @default(autoincrement())
+  title       String
+  content     String   @db.Text
+  releaseDate DateTime  @map("release_date")
+  publishedAt DateTime  @map("published_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id])
+  files       File[]
+
+  @@map("games_news")
+}
+
+model File {
+  id        Int      @id @default(autoincrement())
+  type      String   // e.g., image, video, gif
+  size      Int      // Size in bytes
+  name      String
+  url       String   // URL or path to the file
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  newsId    Int? @map("news_id")
+  gamesNewsId Int? @map("games_news_id")
+  minaSectionId Int? @map("mina_section_id")
+  news      News? @relation(fields: [newsId], references: [id])
+  gamesNews GamesNews? @relation(fields: [gamesNewsId], references: [id])
+  minaSection  MainSection? @relation(fields: [minaSectionId], references: [id])
+
+  @@map("files")
+}
