@@ -1,7 +1,7 @@
 import type { ConfigType } from '@nestjs/config';
 import { registerAs } from '@nestjs/config';
 
-export const authConfig = registerAs('auth', () => {
+export const authConfig = registerAs('jwt', () => {
   const jwtSecret = process.env.JWT_SECRET;
   const refreshTokenSecret = process.env.REFRESH_TOKEN_SECRET;
   if (!jwtSecret) {

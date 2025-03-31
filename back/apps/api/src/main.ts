@@ -1,6 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ApiModule } from './api.module';
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
@@ -17,7 +17,15 @@ async function bootstrap() {
   app.useLogger(logger);
   app.flushLogs();
   app.use(helmet());
-  
+  app.useGlobalPipes(
+    new ValidationPipe({
+        transform: true,
+        transformOptions: {
+            enableImplicitConversion: true,
+        },
+        whitelist: true,
+    }),
+)
   setSwagger(app);
 
   const PORT = process.env.APP_PORT || 8080;
