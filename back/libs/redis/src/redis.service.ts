@@ -63,7 +63,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     try {
       const data = await this.client.get(key);
       if (!data) return null;
-  
+
       // JSON 파싱 시도 → 실패 시 원본 문자열 반환
       try {
         return JSON.parse(data) as T;
@@ -72,7 +72,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       }
     } catch (error) {
       console.error(`Redis GET 실패: ${error.message}`);
-      throw new HttpException(`Redis 오류: ${error.message}`, HttpStatus.INTERNAL_SERVER_ERROR);
+      throw new HttpException(
+        `Redis 오류: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
   }
 

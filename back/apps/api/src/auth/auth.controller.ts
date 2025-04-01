@@ -75,7 +75,7 @@ export class AuthController {
   @UseGuards(AuthGuard) // 인증 가드 적용
   async getProfile(@Req() req: AuthenticatedRequest) {
     const jwtPayload = req.jwtPayload;
-    
+
     if (!jwtPayload) {
       throw new UnauthorizedException('JWT payload not found');
     }
@@ -86,5 +86,13 @@ export class AuthController {
       email: jwtPayload.email,
       role: jwtPayload.role,
     };
+  }
+
+  @Post('logout')
+  @UseGuards(AuthGuard)
+  async logout(@Req() req: AuthenticatedRequest) {
+    const jwtPayload = req.jwtPayload;
+    await this.authService.logout(jwtPayload.sub, jwtPayload.sessionId);
+    return { message: 'Logged out successfully' };
   }
 }

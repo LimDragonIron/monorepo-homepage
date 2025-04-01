@@ -53,13 +53,22 @@ export class AuthService {
       user.id,
       sessionId,
       60 * 60 * 24 * 1, // TTL
-    )
+    );
 
     return { accessToken, refreshToken };
   }
 
-  private async generateAccessToken(user: User,  sessionId: string,): Promise<string> {
-    const payload = { sub: user.id, email: user.email, role: user.role, sessionId };
+  private async generateAccessToken(
+    user: User,
+    sessionId: string,
+  ): Promise<string> {
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      sessionId,
+      jti: nanoid(),
+    };
     const result = await this.jwtService.signAsync(payload, {
       expiresIn:
         this.configService.getOrThrow<AuthConfig>('jwt').accessToken.expiresIn,
@@ -74,7 +83,7 @@ export class AuthService {
     sessionId: string,
   ): Promise<string> {
     const result = await this.jwtService.signAsync(
-      { sub: user.id, sessionId },
+      { sub: user.id, sessionId, jti: nanoid() },
       {
         expiresIn:
           this.configService.getOrThrow<AuthConfig>('jwt').refreshToken
@@ -87,7 +96,7 @@ export class AuthService {
   }
 
   async refresh(refreshPayload: JwtPayload): Promise<{ accessToken: string }> {
-    const { sub: userId, sessionId} = refreshPayload;
+    const { sub: userId, sessionId } = refreshPayload;
 
     // Redis에서 저장된 리프레시 토큰 확인
     const storedToken = await this.redisService.get(
@@ -107,7 +116,14 @@ export class AuthService {
 
     // 새로운 액세스 토큰 발급
     const accessToken = this.jwtService.sign(
-      { sub: user.id, name: user.name, email: user.email, role: user.role },
+      {
+        sub: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        jti: nanoid(),
+        sessionId,
+      },
       {
         secret:
           this.configService.getOrThrow<AuthConfig>('jwt').accessToken.secret,
@@ -121,6 +137,7 @@ export class AuthService {
   }
 
   async logout(userId: string, sessionId: string): Promise<void> {
+    await this.redisService.removeSession(userId, sessionId);
     await this.redisService.delete(`refresh_token:${userId}:${sessionId}`);
   }
 
