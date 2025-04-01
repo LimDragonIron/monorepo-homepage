@@ -1,8 +1,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import Redis from 'ioredis';
-import { RedisKey, RedisValue } from 'ioredis';
+import Redis, { RedisOptions } from 'ioredis';
 import { HttpException, HttpStatus } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
@@ -13,13 +12,20 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   private initializeClient(): void {
-    this.client = new Redis({
+    const redisOptions: RedisOptions = {
       host: this.configService.get<string>('REDIS_HOST'),
       port: this.configService.get<number>('REDIS_PORT'),
       password: this.configService.get<string>('REDIS_PASSWORD'),
-      lazyConnect: true, // 수동 연결 관리
-    });
+      lazyConnect: true,
+      showFriendlyErrorStack: true,
+      retryStrategy: (times) => {
+        const delay = Math.min(1000 * 2 ** times, 30000);
+        console.log(`Redis reconnect attempt #${times}, waiting ${delay}ms`);
+        return delay;
+      },
+    };
 
+    this.client = new Redis(redisOptions);
     this.registerEventListeners();
   }
 
@@ -27,62 +33,75 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     this.client.on('connect', () =>
       console.log('Redis connection established'),
     );
-
     this.client.on('error', (err) => console.error('Redis Client Error:', err));
+    this.client.on('end', () => console.warn('Redis connection closed'));
   }
 
   async onModuleInit(): Promise<void> {
-    await this.client.connect();
+    try {
+      await this.client.connect();
+      console.log('Redis client initialized successfully');
+    } catch (error) {
+      console.error(`Failed to connect to Redis: ${error.message}`);
+      throw new HttpException(
+        `Redis initialization failed: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
 
   async onModuleDestroy(): Promise<void> {
-    await this.client.quit();
+    try {
+      await this.client.quit();
+      console.log('Redis client disconnected successfully');
+    } catch (error) {
+      console.error(`Failed to disconnect Redis client: ${error.message}`);
+    }
   }
 
-  ///
-  async get<T = unknown>(key: RedisKey): Promise<T | null> {
+  async get<T = unknown>(key: string): Promise<T | string | null> {
     try {
       const data = await this.client.get(key);
-      return data ? JSON.parse(data) : null;
+      if (!data) return null;
+  
+      // JSON 파싱 시도 → 실패 시 원본 문자열 반환
+      try {
+        return JSON.parse(data) as T;
+      } catch {
+        return data; // 일반 문자열 처리
+      }
     } catch (error) {
+      console.error(`Redis GET 실패: ${error.message}`);
+      throw new HttpException(`Redis 오류: ${error.message}`, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async set(key: string, value: any, ttl?: number): Promise<'OK'> {
+    try {
+      const stringValue =
+        typeof value === 'object' ? JSON.stringify(value) : String(value);
+      if (ttl) {
+        return await this.client.setex(key, ttl, stringValue);
+      }
+      return await this.client.set(key, stringValue);
+    } catch (error) {
+      console.error(`Failed to set key "${key}" in Redis: ${error.message}`);
       throw new HttpException(
-        `Redis GET 실패: ${error.message}`,
+        `Redis SET failed: ${error.message}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
-  async set(key: RedisKey, value: RedisValue, ttl?: number): Promise<'OK'> {
+  async delete(key: string): Promise<number> {
     try {
-      const stringValue = JSON.stringify(value);
-      return ttl
-        ? this.client.setex(key, ttl, stringValue)
-        : this.client.set(key, stringValue);
+      return await this.client.del(key);
     } catch (error) {
-      throw new HttpException(
-        `Redis SET 실패: ${error.message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
+      console.error(
+        `Failed to delete key "${key}" from Redis: ${error.message}`,
       );
-    }
-  }
-
-  async delete(key: RedisKey): Promise<number> {
-    try {
-      return this.client.del(key);
-    } catch (error) {
       throw new HttpException(
-        `Redis DEL 실패: ${error.message}`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  async keys(pattern = '*'): Promise<string[]> {
-    try {
-      return this.client.keys(pattern);
-    } catch (error) {
-      throw new HttpException(
-        `Redis KEYS 조회 실패: ${error.message}`,
+        `Redis DELETE failed: ${error.message}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -90,15 +109,16 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   async flushAll(): Promise<'OK'> {
     try {
-      return this.client.flushall();
+      return await this.client.flushall();
     } catch (error) {
+      console.error(`Failed to flush all keys in Redis: ${error.message}`);
       throw new HttpException(
-        `Redis FLUSHALL 실패: ${error.message}`,
+        `Redis FLUSHALL failed: ${error.message}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
-  //
+
   async withLock<T = unknown>(
     lockKey: string,
     timeoutMs: number,
@@ -111,9 +131,8 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       timeoutMs,
       'NX',
     );
-
     if (!lockAcquired) {
-      throw new HttpException('리소스 락 획득 실패', HttpStatus.CONFLICT);
+      throw new HttpException('Failed to acquire lock', HttpStatus.CONFLICT);
     }
 
     try {
@@ -125,23 +144,80 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   async publish(channel: string, message: any): Promise<number> {
     try {
-      return this.client.publish(channel, JSON.stringify(message));
+      const serializedMessage =
+        typeof message === 'object' ? JSON.stringify(message) : String(message);
+      return await this.client.publish(channel, serializedMessage);
     } catch (error) {
+      console.error(
+        `Failed to publish message to channel "${channel}": ${error.message}`,
+      );
       throw new HttpException(
-        `Redis PUBLISH 실패: ${error.message}`,
+        `Redis PUBLISH failed: ${error.message}`,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
-  //
   async ping(): Promise<string> {
     try {
-      return this.client.ping();
+      return await this.client.ping();
     } catch (error) {
+      console.error(`Failed to ping Redis server: ${error.message}`);
       throw new HttpException(
-        `Redis 연결 이상: ${error.message}`,
+        `Redis connection issue detected: ${error.message}`,
         HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+  }
+
+  async setUserSession(
+    userId: string,
+    sessionId: string,
+    ttl: number,
+  ): Promise<void> {
+    const key = `user:${userId}:sessions`;
+    try {
+      await this.client.sadd(key, sessionId);
+      await this.client.expire(key, ttl);
+    } catch (error) {
+      console.error(
+        `Failed to set user session for user "${userId}": ${error.message}`,
+      );
+      throw new HttpException(
+        `Redis SET SESSION failed: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async validateSession(userId: string, sessionId: string): Promise<boolean> {
+    try {
+      const result = await this.client.sismember(
+        `user:${userId}:sessions`,
+        sessionId,
+      );
+      return result === 1;
+    } catch (error) {
+      console.error(
+        `Failed to validate session for user "${userId}": ${error.message}`,
+      );
+      throw new HttpException(
+        `Redis VALIDATE SESSION failed: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async removeSession(userId: string, sessionId: string): Promise<void> {
+    try {
+      await this.client.srem(`user:${userId}:sessions`, sessionId);
+    } catch (error) {
+      console.error(
+        `Failed to remove session for user "${userId}": ${error.message}`,
+      );
+      throw new HttpException(
+        `Redis REMOVE SESSION failed: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }

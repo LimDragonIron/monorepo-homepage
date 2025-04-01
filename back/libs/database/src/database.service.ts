@@ -27,7 +27,7 @@ export class DatabaseService
       },
     });
     const maskedUrl = databaseUrl.replace(/:\/\/[^@]+@/, '://***:***@');
-    
+
     this.logger.log('DatabaseService initialized');
     this.logger.log(`Database URL: ${maskedUrl}`);
 

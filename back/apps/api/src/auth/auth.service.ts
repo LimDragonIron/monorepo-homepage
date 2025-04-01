@@ -1,10 +1,12 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { UserService } from '../user/user.service';
 import { JwtService } from '@nestjs/jwt';
-import { User } from 'libs/types';
+import { JwtPayload, Tokens, User } from 'libs/types';
 import { ConfigService } from '@nestjs/config';
 import { AuthConfig } from '@app/config';
 import { SignUpDto } from './dto/signup.dto';
+import { nanoid } from 'nanoid';
+import { RedisService } from '@app/redis';
 
 @Injectable()
 export class AuthService {
@@ -12,6 +14,7 @@ export class AuthService {
     private readonly userService: UserService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly redisService: RedisService,
   ) {}
 
   async validateUser(email: string, password: string): Promise<User | null> {
@@ -33,57 +36,92 @@ export class AuthService {
     return null;
   }
 
-  async signin(
-    user: User,
-  ): Promise<{ accessToken: string; refreshToken?: string }> {
-    const payload = {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      name: user.name,
-    };
-    const accessToken = await this.jwtService.signAsync(payload, {
-      expiresIn: this.configService.getOrThrow<AuthConfig>('jwt').jwt.expiresIn,
-      secret: this.configService.getOrThrow<AuthConfig>('jwt').jwt.secret,
-    });
+  async signin(user: User): Promise<Tokens> {
+    const sessionId = nanoid();
+    const [accessToken, refreshToken] = await Promise.all([
+      this.generateAccessToken(user, sessionId),
+      this.generateRefreshToken(user, sessionId),
+    ]);
 
-    const refreshToken = await this.jwtService.signAsync(payload, {
-      expiresIn:
-        this.configService.getOrThrow<AuthConfig>('jwt').refreshToken.expiresIn,
-      secret:
-        this.configService.getOrThrow<AuthConfig>('jwt').refreshToken.secret,
-    });
+    await this.redisService.set(
+      `refresh_token:${user.id}:${sessionId}`,
+      refreshToken,
+      60 * 60 * 24 * 7, // TTL
+    );
+
+    await this.redisService.setUserSession(
+      user.id,
+      sessionId,
+      60 * 60 * 24 * 1, // TTL
+    )
 
     return { accessToken, refreshToken };
   }
 
-  async refresh(refreshToken: string): Promise<{ accessToken: string }> {
-    try {
-      const payload = this.jwtService.verify(refreshToken, {
+  private async generateAccessToken(user: User,  sessionId: string,): Promise<string> {
+    const payload = { sub: user.id, email: user.email, role: user.role, sessionId };
+    const result = await this.jwtService.signAsync(payload, {
+      expiresIn:
+        this.configService.getOrThrow<AuthConfig>('jwt').accessToken.expiresIn,
+      secret:
+        this.configService.getOrThrow<AuthConfig>('jwt').accessToken.secret,
+    });
+    return result;
+  }
+
+  private async generateRefreshToken(
+    user: User,
+    sessionId: string,
+  ): Promise<string> {
+    const result = await this.jwtService.signAsync(
+      { sub: user.id, sessionId },
+      {
+        expiresIn:
+          this.configService.getOrThrow<AuthConfig>('jwt').refreshToken
+            .expiresIn,
         secret:
           this.configService.getOrThrow<AuthConfig>('jwt').refreshToken.secret,
-      });
+      },
+    );
+    return result;
+  }
 
-      const newAccessToken = await this.jwtService.signAsync(
-        {
-          id: payload.id,
-          email: payload.email,
-          role: payload.role,
-          name: payload.name,
-        },
-        {
-          expiresIn:
-            this.configService.getOrThrow<AuthConfig>('jwt').jwt.expiresIn,
-          secret: this.configService.getOrThrow<AuthConfig>('jwt').jwt.secret,
-        },
-      );
+  async refresh(refreshPayload: JwtPayload): Promise<{ accessToken: string }> {
+    const { sub: userId, sessionId} = refreshPayload;
 
-      return {
-        accessToken: newAccessToken,
-      };
-    } catch (e) {
-      throw new UnauthorizedException('Invalid refresh token');
+    // Redis에서 저장된 리프레시 토큰 확인
+    const storedToken = await this.redisService.get(
+      `refresh_token:${userId}:${sessionId}`,
+    );
+
+    if (!storedToken) {
+      throw new UnauthorizedException('Invalid or expired refresh token');
     }
+
+    // 사용자 정보 가져오기
+    const user = await this.userService.findUserById(userId);
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    // 새로운 액세스 토큰 발급
+    const accessToken = this.jwtService.sign(
+      { sub: user.id, name: user.name, email: user.email, role: user.role },
+      {
+        secret:
+          this.configService.getOrThrow<AuthConfig>('jwt').accessToken.secret,
+        expiresIn:
+          this.configService.getOrThrow<AuthConfig>('jwt').accessToken
+            .expiresIn,
+      },
+    );
+
+    return { accessToken };
+  }
+
+  async logout(userId: string, sessionId: string): Promise<void> {
+    await this.redisService.delete(`refresh_token:${userId}:${sessionId}`);
   }
 
   async signup(user: SignUpDto): Promise<boolean> {

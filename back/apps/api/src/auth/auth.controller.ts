@@ -1,43 +1,90 @@
 import {
   Body,
   Controller,
+  Get,
   Post,
+  Req,
+  SetMetadata,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { SignInDto } from './dto/signin.dto';
-import { RefreshGuard } from './auth.refresh.guard';
 import { SignUpDto } from './dto/signup.dto';
+import { AuthGuard, TOKEN_TYPE_KEY } from './auth.guard';
+import { AuthenticatedRequest } from 'libs/types';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  /**
+   * 사용자 로그인 처리
+   * @param signinDto 이메일과 비밀번호를 포함한 로그인 DTO
+   */
   @Post('signin')
   async signin(@Body() signinDto: SignInDto) {
     const user = await this.authService.validateUser(
       signinDto.email,
       signinDto.password,
     );
+
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
+
     return await this.authService.signin(user);
   }
 
-  @UseGuards(RefreshGuard)
+  /**
+   * 리프레시 토큰을 사용하여 액세스 토큰 갱신
+   * @param req 인증된 요청 객체
+   */
   @Post('refresh')
-  async refresh(@Body('refreshToken') refreshToken: string) {
-    if (!refreshToken) {
-      throw new UnauthorizedException('Refresh token not provided');
+  @SetMetadata(TOKEN_TYPE_KEY, 'refresh') // 리프레시 토큰 타입 설정
+  @UseGuards(AuthGuard) // 인증 가드 적용
+  async refreshToken(@Req() req: AuthenticatedRequest) {
+    const refreshPayload = req.refreshPayload;
+
+    if (!refreshPayload) {
+      throw new UnauthorizedException('Refresh token payload not found');
     }
-    return await this.authService.refresh(refreshToken);
+
+    return await this.authService.refresh(refreshPayload);
   }
 
+  /**
+   * 사용자 회원가입 처리
+   * @param signupDto 회원가입 DTO
+   */
   @Post('signup')
   async signup(@Body() signupDto: SignUpDto) {
-    console.log('signupDto', signupDto);
-    return await this.authService.signup(signupDto);
+    try {
+      return await this.authService.signup(signupDto);
+    } catch (error) {
+      console.error('Signup error:', error.message);
+      throw new UnauthorizedException('Failed to sign up');
+    }
+  }
+
+  /**
+   * 사용자 프로필 조회 (JWT 액세스 토큰 필요)
+   * @param req 인증된 요청 객체
+   */
+  @Get('profile')
+  @UseGuards(AuthGuard) // 인증 가드 적용
+  async getProfile(@Req() req: AuthenticatedRequest) {
+    const jwtPayload = req.jwtPayload;
+    
+    if (!jwtPayload) {
+      throw new UnauthorizedException('JWT payload not found');
+    }
+
+    return {
+      id: jwtPayload.sub,
+      name: jwtPayload.name,
+      email: jwtPayload.email,
+      role: jwtPayload.role,
+    };
   }
 }

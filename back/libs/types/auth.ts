@@ -10,6 +10,13 @@ export interface JwtPayload {
   name: string;
   email: string;
   role: string;
+  sessionId: string;
+  jti: string;
   iat: number;
   exp: number;
+}
+
+export interface Tokens {
+  accessToken: string;
+  refreshToken: string;
 }

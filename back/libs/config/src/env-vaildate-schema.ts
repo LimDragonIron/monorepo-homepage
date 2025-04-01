@@ -1,10 +1,5 @@
 import { plainToInstance } from 'class-transformer';
-import {
-  IsEnum,
-  IsNotEmpty,
-  IsString,
-  validateSync,
-} from 'class-validator';
+import { IsEnum, IsNotEmpty, IsString, validateSync } from 'class-validator';
 
 enum Environment {
   Local = 'local',
@@ -26,7 +21,15 @@ class EnvValidateSchema {
 
   @IsString()
   @IsNotEmpty()
+  JWT_EXPIRES_IN: string;
+
+  @IsString()
+  @IsNotEmpty()
   REFRESH_TOKEN_SECRET: string;
+
+  @IsString()
+  @IsNotEmpty()
+  REFRESH_TOKEN_EXPIRES_IN: string;
 
   @IsString()
   @IsNotEmpty()

@@ -11,7 +11,7 @@ export const authConfig = registerAs('jwt', () => {
     throw new Error('REFRESH_TOKEN_SECRET is not set');
   }
   return {
-    jwt: {
+    accessToken: {
       secret: jwtSecret,
       expiresIn: process.env.JWT_EXPIRES_IN || '1h',
     },

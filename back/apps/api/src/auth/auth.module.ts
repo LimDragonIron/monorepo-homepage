@@ -20,9 +20,10 @@ const AuthGuardMeta = {
       inject: [ConfigService],
       useFactory: async (configService: ConfigService) => ({
         global: true,
-        secret: configService.getOrThrow<AuthConfig>('jwt').jwt.secret,
+        secret: configService.getOrThrow<AuthConfig>('jwt').accessToken.secret,
         signOptions: {
-          expiresIn: configService.getOrThrow<AuthConfig>('jwt').jwt.expiresIn,
+          expiresIn:
+            configService.getOrThrow<AuthConfig>('jwt').accessToken.expiresIn,
         },
         refreshSecret:
           configService.getOrThrow<AuthConfig>('jwt').refreshToken.secret,

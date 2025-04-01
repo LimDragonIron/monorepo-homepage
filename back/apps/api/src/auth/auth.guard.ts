@@ -3,14 +3,17 @@ import {
   CanActivate,
   ExecutionContext,
   UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { AuthenticatedRequest, JwtPayload } from 'libs/types';
 import { AuthConfig } from '@app/config';
+import { RedisService } from '@app/redis';
 
-const IS_PUBLIC_KEY = 'isPublic';
+export const IS_PUBLIC_KEY = 'isPublic';
+export const TOKEN_TYPE_KEY = 'tokenType';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -18,6 +21,7 @@ export class AuthGuard implements CanActivate {
     private readonly jwtService: JwtService,
     private readonly reflector: Reflector,
     private readonly configService: ConfigService,
+    private readonly redisService: RedisService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -29,52 +33,167 @@ export class AuthGuard implements CanActivate {
     if (isPublic) return true;
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    const token = this.extractToken(request);
-
+    const tokenType = this.getTokenType(context);
+    const { token, secret } = this.extractTokenData(request, tokenType);
+    let payload: JwtPayload | undefined;
     try {
-      const payload = await this.jwtService.verifyAsync<JwtPayload>(token, {
-        secret: this.configService.getOrThrow<AuthConfig>('jwt').jwt.secret,
-        clockTolerance: 30, // 30초 시간 오차 허용
-        ignoreExpiration: false, // 기본값(false)이지만 명시적 설정
-      });
-
-      this.validateTokenTiming(payload);
-      request.jwtPayload = payload;
+      payload = await this.verifyToken(token, secret);
+      await this.validateSession(payload);
+      await this.checkTokenReuse(request, payload);
+      this.assignPayload(request, payload, tokenType);
       return true;
     } catch (error) {
-      this.handleAuthError(error, request);
+      const errorPayload = payload ?? this.decodePartialPayload(token);
+      this.handleSecurityEvents(error, request, errorPayload);
+      throw error;
     }
   }
 
-  private extractToken(request: AuthenticatedRequest): string {
-    const [type, token] = request.headers.authorization?.split(' ') ?? [];
-    if (type !== 'Bearer' || !token) {
-      throw new UnauthorizedException('Bearer token not found');
+  private decodePartialPayload(token: string): Partial<JwtPayload> {
+    try {
+      const decoded = this.jwtService.decode(token) as Partial<JwtPayload>;
+      return {
+        sub: decoded?.sub,
+        jti: decoded?.jti,
+        sessionId: decoded?.sessionId,
+        name: decoded?.name,
+        email: decoded?.email,
+        role: decoded?.role,
+      };
+    } catch {
+      return {};
     }
+  }
+
+  private getTokenType(context: ExecutionContext): 'access' | 'refresh' {
+    return (
+      this.reflector.getAllAndOverride<'access' | 'refresh'>(TOKEN_TYPE_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]) || 'access'
+    );
+  }
+
+  private extractTokenData(
+    request: AuthenticatedRequest,
+    tokenType: 'access' | 'refresh',
+  ): { token: string; secret: string } {
+    console.log(tokenType)
+    const token = this.extractTokenFromRequest(request, tokenType);
+    const secret =
+      this.configService.getOrThrow<AuthConfig>('jwt')[
+        tokenType === 'access' ? 'accessToken' : 'refreshToken'
+      ].secret;
+
+    return { token, secret };
+  }
+
+  private extractTokenFromRequest(
+    request: AuthenticatedRequest,
+    tokenType: 'access' | 'refresh',
+  ): string {
+    const cookieName =
+      tokenType === 'access' ? 'access_token' : 'refresh_token';
+    const sources = [
+      request.headers.authorization?.split(' ')[1],
+      request.cookies?.[cookieName],
+      request.query?.token,
+    ];
+
+    const token = sources.find((t) => typeof t === 'string' && t.length >= 100);
+    if (!token) throw new UnauthorizedException('Token not found');
+
     return token;
   }
 
-  private validateTokenTiming(payload: JwtPayload): void {
-    const now = Math.floor(Date.now() / 1000);
-
-    if (payload.exp < now - 30) {
-      // 30초 유예 기간
-      throw new UnauthorizedException('Token expired');
+  private async verifyToken(
+    token: string,
+    secret: string,
+  ): Promise<JwtPayload> {
+    try {
+      return await this.jwtService.verifyAsync<JwtPayload>(token, {
+        secret,
+        clockTolerance: 30,
+      });
+    } catch (e) {
+      const errorType =
+        e.name === 'TokenExpiredError'
+          ? 'Expired token'
+          : 'Invalid token signature';
+      throw new UnauthorizedException(errorType);
     }
   }
 
-  private handleAuthError(error: Error, request: AuthenticatedRequest): never {
-    const errorInfo = {
+  private async validateSession(payload: JwtPayload): Promise<void> {
+    const sessionValid = await this.redisService.validateSession(
+      payload.sub,
+      payload.sessionId,
+    );
+
+    if (!sessionValid) {
+      throw new UnauthorizedException('Invalid or expired session');
+    }
+  }
+
+  private async checkTokenReuse(
+    request: AuthenticatedRequest,
+    payload: JwtPayload,
+  ): Promise<void> {
+    const lastUsedAt = await this.redisService.get(
+      `token:lastUsed:${payload.jti}`,
+    );
+
+    if (lastUsedAt) {
+      await this.redisService.publish('security-events', {
+        type: 'TOKEN_REUSE',
+        jti: payload.jti,
+        ip: request.ip || request.headers['x-forwarded-for'],
+        timestamp: new Date(),
+      });
+      throw new ForbiddenException('Token reuse detected');
+    }
+
+    const ttl = payload.exp - Math.floor(Date.now() / 1000); // 남은 유효 시간 계산
+    await this.redisService.set(
+      `token:lastUsed:${payload.jti}`,
+      Date.now(),
+      ttl,
+    );
+  }
+
+  private assignPayload(
+    request: AuthenticatedRequest,
+    payload: JwtPayload,
+    tokenType: 'access' | 'refresh',
+  ): void {
+    if (tokenType === 'access') {
+      request.jwtPayload = payload;
+    } else {
+      request.refreshPayload = payload;
+    }
+  }
+
+  private handleSecurityEvents(
+    error: Error,
+    request: AuthenticatedRequest,
+    payload?: Partial<JwtPayload>,
+  ): void {
+    const eventData = {
+      timestamp: new Date().toISOString(),
       path: request.url,
       method: request.method,
-      error: error.message,
+      ip:
+        request.headers['x-forwarded-for'] ||
+        request.connection.remoteAddress ||
+        request.ip,
+      userAgent: request.headers['user-agent'],
+      errorMessage: error.message,
+      userId: payload?.sub ?? 'unknown',
+      sessionId: payload?.sessionId ?? 'unknown',
+      tokenId: payload?.jti ?? 'unknown',
     };
 
-    console.error('Auth Error:', errorInfo);
-    throw new UnauthorizedException({
-      statusCode: 401,
-      message: 'Authentication failed',
-      details: errorInfo,
-    });
+    console.error('Security Event:', eventData);
+    this.redisService.publish('security-audit', eventData);
   }
 }
