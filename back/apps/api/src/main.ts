@@ -19,13 +19,13 @@ async function bootstrap() {
   app.use(helmet());
   app.useGlobalPipes(
     new ValidationPipe({
-        transform: true,
-        transformOptions: {
-            enableImplicitConversion: true,
-        },
-        whitelist: true,
+      transform: true,
+      transformOptions: {
+        enableImplicitConversion: true,
+      },
+      whitelist: true,
     }),
-)
+  );
   setSwagger(app);
 
   const PORT = process.env.APP_PORT || 8080;

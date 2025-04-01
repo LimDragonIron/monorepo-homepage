@@ -1,4 +1,9 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AuthenticatedRequest, JwtPayload } from 'libs/types';
@@ -38,7 +43,8 @@ export class RefreshGuard implements CanActivate {
   private validateTokenTiming(payload: JwtPayload): void {
     const now = Math.floor(Date.now() / 1000);
 
-    if (payload.exp < now - 30) { // 30초 유예 기간
+    if (payload.exp < now - 30) {
+      // 30초 유예 기간
       throw new UnauthorizedException('Refresh token expired');
     }
   }

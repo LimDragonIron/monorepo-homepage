@@ -37,7 +37,7 @@ export class AuthGuard implements CanActivate {
         clockTolerance: 30, // 30초 시간 오차 허용
         ignoreExpiration: false, // 기본값(false)이지만 명시적 설정
       });
-      
+
       this.validateTokenTiming(payload);
       request.jwtPayload = payload;
       return true;
@@ -56,8 +56,9 @@ export class AuthGuard implements CanActivate {
 
   private validateTokenTiming(payload: JwtPayload): void {
     const now = Math.floor(Date.now() / 1000);
-    
-    if (payload.exp < now - 30) { // 30초 유예 기간
+
+    if (payload.exp < now - 30) {
+      // 30초 유예 기간
       throw new UnauthorizedException('Token expired');
     }
   }
@@ -68,7 +69,7 @@ export class AuthGuard implements CanActivate {
       method: request.method,
       error: error.message,
     };
-    
+
     console.error('Auth Error:', errorInfo);
     throw new UnauthorizedException({
       statusCode: 401,

@@ -17,7 +17,6 @@ const AuthGuardMeta = {
   imports: [
     UserModule,
     JwtModule.registerAsync({
-      imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: async (configService: ConfigService) => ({
         global: true,

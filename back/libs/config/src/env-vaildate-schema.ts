@@ -2,7 +2,6 @@ import { plainToInstance } from 'class-transformer';
 import {
   IsEnum,
   IsNotEmpty,
-  IsNumber,
   IsString,
   validateSync,
 } from 'class-validator';
@@ -28,6 +27,18 @@ class EnvValidateSchema {
   @IsString()
   @IsNotEmpty()
   REFRESH_TOKEN_SECRET: string;
+
+  @IsString()
+  @IsNotEmpty()
+  REDIS_HOST: string;
+
+  @IsString()
+  @IsNotEmpty()
+  REDIS_PORT: string;
+
+  @IsString()
+  @IsNotEmpty()
+  REDIS_PASSWORD: string;
 }
 
 export const validate = (config: Record<string, unknown>) => {

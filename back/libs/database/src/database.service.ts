@@ -26,21 +26,22 @@ export class DatabaseService
         },
       },
     });
+    const maskedUrl = databaseUrl.replace(/:\/\/[^@]+@/, '://***:***@');
+    
     this.logger.log('DatabaseService initialized');
-    this.logger.log(`databaseUrl: ${databaseUrl}`);
+    this.logger.log(`Database URL: ${maskedUrl}`);
 
-    // @ts-ignore
-    this.$on('query', (query, parmas) => {
-      this.logger.log(`Query: ${query}`);
-      this.logger.log(`Params: ${JSON.stringify(parmas)}`);
+    this.$on('query' as never, (event: { query: string; params: any }) => {
+      this.logger.log(`Query: ${event.query}`);
+      this.logger.log(`Params: ${JSON.stringify(event.params)}`);
     });
   }
 
-  async onModuleInit() {
+  async onModuleInit(): Promise<void> {
     await this.$connect();
   }
 
-  async onModuleDestroy() {
+  async onModuleDestroy(): Promise<void> {
     await this.$disconnect();
   }
 }

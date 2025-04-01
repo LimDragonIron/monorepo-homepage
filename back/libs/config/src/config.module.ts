@@ -7,6 +7,7 @@ import { nanoid } from 'nanoid';
 import { Request } from 'express';
 import { DatabaseModule } from '@app/database';
 import { LoggerModule } from './logger.module';
+import { RedisModule } from '@app/redis';
 
 const X_REQUEST_ID = 'x-request-id';
 
@@ -33,6 +34,7 @@ const clsModule = ClsModule.forRoot({
     clsModule,
     LoggerModule.register(),
     DatabaseModule.forRoot(),
+    RedisModule.forRoot(),
   ],
 })
 export class GlobalConfigModule implements NestModule {

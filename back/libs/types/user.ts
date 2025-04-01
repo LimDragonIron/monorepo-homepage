@@ -5,4 +5,3 @@ export interface User {
   role?: string;
   password?: string;
 }
-

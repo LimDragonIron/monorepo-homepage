@@ -28,6 +28,7 @@
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^10.0.0",
     "@nestjs/jwt": "^11.0.0",
+    "@nestjs/microservices": "^10.4.15",
     "@nestjs/platform-express": "^10.0.0",
     "@nestjs/swagger": "^7.4.2",
     "@prisma/client": "^6.5.0",
@@ -37,6 +38,7 @@
     "class-validator": "^0.14.1",
     "cross-env": "^7.0.3",
     "helmet": "^8.1.0",
+    "ioredis": "^5.6.0",
     "nanoid": "^3.3.7",
     "nestjs-cls": "^5.4.2",
     "nestjs-pino": "^4.4.0",
@@ -50,6 +52,7 @@
     "@nestjs/schematics": "^10.0.0",
     "@nestjs/testing": "^10.0.0",
     "@types/express": "^5.0.0",
+    "@types/ioredis": "^4.28.10",
     "@types/jest": "^29.5.2",
     "@types/node": "^20.3.1",
     "@types/supertest": "^6.0.0",
@@ -91,7 +94,8 @@
     "moduleNameMapper": {
       "^@app/database(|/.*)$": "<rootDir>/libs/database/src/$1",
       "^@app/config(|/.*)$": "<rootDir>/libs/config/src/$1",
-      "^@app/storage(|/.*)$": "<rootDir>/libs/storage/src/$1"
+      "^@app/storage(|/.*)$": "<rootDir>/libs/storage/src/$1",
+      "^@app/redis(|/.*)$": "<rootDir>/libs/redis/src/$1"
     }
   }
 }

@@ -37,9 +37,9 @@ export class UserService {
     updateUser: Partial<UserDto>,
   ): Promise<User> {
     const { name, email, password, role } = updateUser;
-    
+
     const data: any = {};
-    
+
     if (name) {
       data.name = name;
     }
@@ -50,7 +50,7 @@ export class UserService {
       data.password = await bcrypt.hash(password, 10);
     }
 
-    if(role) {
+    if (role) {
       data.role = role;
     }
 
@@ -142,12 +142,11 @@ export class UserService {
     return result;
   }
 
-  async comparePassword(password:string, hash:string): Promise<boolean> {
+  async comparePassword(password: string, hash: string): Promise<boolean> {
     const result = await bcrypt.compare(password, hash);
     if (!result) {
       throw new Error('Password comparison failed');
     }
     return true;
   }
-
 }
