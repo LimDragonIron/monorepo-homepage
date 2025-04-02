@@ -78,7 +78,6 @@ export class AuthGuard implements CanActivate {
     request: AuthenticatedRequest,
     tokenType: 'access' | 'refresh',
   ): { token: string; secret: string } {
-    console.log(tokenType);
     const token = this.extractTokenFromRequest(request, tokenType);
     const secret =
       this.configService.getOrThrow<AuthConfig>('jwt')[

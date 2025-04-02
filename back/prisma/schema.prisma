@@ -23,19 +23,31 @@ model User {
 
   news      News[]
   gamesNews GamesNews[]
-
+  promotionBanners PromotionBanners[]
   @@map("users")
 }
 
-model MainSection {
-  id        Int      @id @default(autoincrement())
-  title     String?
-  content   String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  files     File[]
+model PromotionBanners {
+    id        Int      @id @default(autoincrement())
+    title     String?
+    content   String
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+    authorId   String
+    author     User     @relation(fields: [authorId], references: [id])
+    files     File[]
+    isActive  Boolean  @default(false)
+    activation ActivePromotionBanner? @relation("ActiveBanner")
+    @@map("promotion_banners")
+}
 
-  @@map("main_sections")
+model ActivePromotionBanner {
+  id           Int              @id @default(1) @unique 
+  banner   PromotionBanners @relation("ActiveBanner", fields: [bannerId], references: [id])
+  bannerId Int              @unique
+  activatedAt  DateTime         @default(now())
+
+  @@map("active_promotion_banner")
 }
 
 model News {
@@ -77,10 +89,11 @@ model File {
   updatedAt DateTime @updatedAt @map("updated_at")
   newsId    Int? @map("news_id")
   gamesNewsId Int? @map("games_news_id")
+  promotionBannerId Int? @map("promotion_banner_id")
   minaSectionId Int? @map("mina_section_id")
   news      News? @relation(fields: [newsId], references: [id])
   gamesNews GamesNews? @relation(fields: [gamesNewsId], references: [id])
-  minaSection  MainSection? @relation(fields: [minaSectionId], references: [id])
-
+  promotionBanner PromotionBanners? @relation(fields: [promotionBannerId], references: [id])
+  
   @@map("files")
 }

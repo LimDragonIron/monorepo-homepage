@@ -1,9 +1,13 @@
-import { NestFactory } from '@nestjs/core';
+import { HttpAdapterHost, NestFactory, Reflector } from '@nestjs/core';
 import { ApiModule } from './api.module';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
+import { AuthGuard } from './auth/auth.guard';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import { RedisService } from '@app/redis';
 
 async function bootstrap() {
   const app = await NestFactory.create(ApiModule, {
@@ -12,6 +16,18 @@ async function bootstrap() {
     },
     bufferLogs: true,
   });
+
+  const reflector = app.get(Reflector);
+  const jwtService = app.get(JwtService);
+  const configService = app.get(ConfigService);
+  const redisService = app.get(RedisService);
+  const authGuard = new AuthGuard(
+    jwtService,
+    reflector,
+    configService,
+    redisService,
+  );
+  app.useGlobalGuards(authGuard);
 
   const logger = app.get(Logger);
   app.useLogger(logger);
@@ -26,6 +42,7 @@ async function bootstrap() {
       whitelist: true,
     }),
   );
+
   setSwagger(app);
 
   const PORT = process.env.APP_PORT || 8080;
