@@ -3,15 +3,8 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UserModule } from '../user/user.module';
 import { JwtModule } from '@nestjs/jwt';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
 import { AuthConfig } from '@app/config';
-import { APP_GUARD } from '@nestjs/core';
-import { AuthGuard } from './auth.guard';
-
-const AuthGuardMeta = {
-  provide: APP_GUARD,
-  useClass: AuthGuard,
-};
 
 @Module({
   imports: [

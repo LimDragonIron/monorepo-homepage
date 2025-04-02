@@ -1,6 +1,10 @@
 import { HttpAdapterHost, NestFactory, Reflector } from '@nestjs/core';
 import { ApiModule } from './api.module';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  ClassSerializerInterceptor,
+  INestApplication,
+  ValidationPipe,
+} from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
@@ -21,13 +25,10 @@ async function bootstrap() {
   const jwtService = app.get(JwtService);
   const configService = app.get(ConfigService);
   const redisService = app.get(RedisService);
-  const authGuard = new AuthGuard(
-    jwtService,
-    reflector,
-    configService,
-    redisService,
+
+  app.useGlobalGuards(
+    new AuthGuard(jwtService, reflector, configService, redisService),
   );
-  app.useGlobalGuards(authGuard);
 
   const logger = app.get(Logger);
   app.useLogger(logger);
@@ -42,6 +43,8 @@ async function bootstrap() {
       whitelist: true,
     }),
   );
+
+  app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
 
   setSwagger(app);
 

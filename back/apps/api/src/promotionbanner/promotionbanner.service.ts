@@ -1,6 +1,7 @@
 import { DatabaseService } from '@app/database/database.service';
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, PromotionBanners } from '@prisma/client';
+import { ResponseBuilder } from 'libs/common/response/response-builder';
 
 @Injectable()
 export class PromotionbannerService {
@@ -54,10 +55,16 @@ export class PromotionbannerService {
     ]);
   }
 
-  async getActiveBanner() {
-    return this.database.activePromotionBanner.findUnique({
-      where: { id: 1 },
+  async getActiveBanner(): Promise<ResponseBuilder<PromotionBanners, string>> {
+    const active = await this.database.activePromotionBanner.findFirst({
       include: { banner: true },
     });
+
+    if (!active) {
+      throw new NotFoundException(
+        ResponseBuilder.Error('활성화된 배너 없음', 'RESOURCE_NOT_FOUND'),
+      );
+    }
+    return ResponseBuilder.OK_WITH(active.banner, ' 활성화 배너 ');
   }
 }

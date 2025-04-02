@@ -11,6 +11,8 @@ import { ConfigService } from '@nestjs/config';
 import { AuthenticatedRequest, JwtPayload } from 'libs/types';
 import { AuthConfig } from '@app/config';
 import { RedisService } from '@app/redis';
+import { ResponseBuilder } from 'libs/common/response/response-builder';
+import { nanoid } from 'nanoid';
 
 export const IS_PUBLIC_KEY = 'isPublic';
 export const TOKEN_TYPE_KEY = 'tokenType';
@@ -33,9 +35,10 @@ export class AuthGuard implements CanActivate {
     if (isPublic) return true;
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
+
+    let payload: JwtPayload | undefined;
     const tokenType = this.getTokenType(context);
     const { token, secret } = this.extractTokenData(request, tokenType);
-    let payload: JwtPayload | undefined;
     try {
       payload = await this.verifyToken(token, secret);
       await this.validateSession(payload);
@@ -141,23 +144,34 @@ export class AuthGuard implements CanActivate {
     const lastUsedAt = await this.redisService.get(
       `token:lastUsed:${payload.jti}`,
     );
-
     if (lastUsedAt) {
+      // 토큰 패밀리 전체 삭제 (token family 개념 적용)
+      await this.redisService.deleteByPattern(`token:family:${payload.sub}:*`);
+
+      // 보안 이벤트 발행
       await this.redisService.publish('security-events', {
         type: 'TOKEN_REUSE',
         jti: payload.jti,
         ip: request.ip || request.headers['x-forwarded-for'],
+        userId: payload.sub,
         timestamp: new Date(),
       });
-      throw new ForbiddenException('Token reuse detected');
+
+      throw new ForbiddenException(
+        ResponseBuilder.Error('Security violation detected', 'TOKEN_REUSE', {
+          action: 'full_logout',
+        }),
+      );
     }
 
-    const ttl = payload.exp - Math.floor(Date.now() / 1000); // 남은 유효 시간 계산
-    await this.redisService.set(
-      `token:lastUsed:${payload.jti}`,
-      Date.now(),
-      ttl,
-    );
+    // 토큰 패밀리 추적 추가
+    const familyKey = `token:family:${payload.sub}:${nanoid()}`;
+    const ttl = payload.exp - Math.floor(Date.now() / 1000);
+
+    await Promise.all([
+      this.redisService.set(`token:lastUsed:${payload.jti}`, Date.now(), ttl),
+      this.redisService.set(familyKey, payload.jti, ttl),
+    ]);
   }
 
   private assignPayload(

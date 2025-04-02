@@ -7,6 +7,8 @@ import { AuthConfig } from '@app/config';
 import { SignUpDto } from './dto/signup.dto';
 import { nanoid } from 'nanoid';
 import { RedisService } from '@app/redis';
+import { ResponseBuilder } from 'libs/common/response/response-builder';
+import { SignInDto } from './dto';
 
 @Injectable()
 export class AuthService {
@@ -36,7 +38,17 @@ export class AuthService {
     return null;
   }
 
-  async signin(user: User): Promise<Tokens> {
+  async signin(
+    signinDto: SignInDto,
+  ): Promise<ResponseBuilder<Tokens, undefined>> {
+    const user = await this.validateUser(signinDto.email, signinDto.password);
+
+    if (!user) {
+      throw new UnauthorizedException(
+        ResponseBuilder.Error('Invalid credentials', 'UNAUTHORIZED'),
+      );
+    }
+
     const sessionId = nanoid();
     const [accessToken, refreshToken] = await Promise.all([
       this.generateAccessToken(user, sessionId),
@@ -55,7 +67,7 @@ export class AuthService {
       60 * 60 * 24 * 1, // TTL
     );
 
-    return { accessToken, refreshToken };
+    return ResponseBuilder.OK_WITH({ accessToken, refreshToken });
   }
 
   private async generateAccessToken(
@@ -69,20 +81,19 @@ export class AuthService {
       sessionId,
       jti: nanoid(),
     };
-    const result = await this.jwtService.signAsync(payload, {
+    return this.jwtService.signAsync(payload, {
       expiresIn:
         this.configService.getOrThrow<AuthConfig>('jwt').accessToken.expiresIn,
       secret:
         this.configService.getOrThrow<AuthConfig>('jwt').accessToken.secret,
     });
-    return result;
   }
 
   private async generateRefreshToken(
     user: User,
     sessionId: string,
   ): Promise<string> {
-    const result = await this.jwtService.signAsync(
+    return this.jwtService.signAsync(
       { sub: user.id, sessionId, jti: nanoid() },
       {
         expiresIn:
@@ -92,66 +103,127 @@ export class AuthService {
           this.configService.getOrThrow<AuthConfig>('jwt').refreshToken.secret,
       },
     );
-    return result;
   }
+  async refreshToken(
+    refreshPayload: JwtPayload,
+  ): Promise<ResponseBuilder<Tokens, string>> {
+    const {
+      sub: userId,
+      sessionId: oldSessionId,
+      jti: oldJti,
+    } = refreshPayload;
 
-  async refresh(refreshPayload: JwtPayload): Promise<{ accessToken: string }> {
-    const { sub: userId, sessionId } = refreshPayload;
-
-    // Redis에서 저장된 리프레시 토큰 확인
+    // 1. 저장된 Refresh Token 확인
     const storedToken = await this.redisService.get(
-      `refresh_token:${userId}:${sessionId}`,
+      `refresh_token:${userId}:${oldSessionId}`,
     );
-
     if (!storedToken) {
-      throw new UnauthorizedException('Invalid or expired refresh token');
+      throw new UnauthorizedException(
+        ResponseBuilder.Error('Invalid refresh token', 'TOKEN_INVALID'),
+      );
     }
 
-    // 사용자 정보 가져오기
-    const user = await this.userService.findUserById(userId);
+    // 2. 사용자 세션 유효성 검증 (추가된 부분)
+    const sessionValid = await this.redisService.validateSession(
+      userId,
+      oldSessionId,
+    );
+    if (!sessionValid) {
+      throw new UnauthorizedException(
+        ResponseBuilder.Error('Expired session', 'SESSION_EXPIRED'),
+      );
+    }
 
+    const user = await this.userService.findUserById(userId);
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
 
-    // 새로운 액세스 토큰 발급
-    const accessToken = this.jwtService.sign(
-      {
-        sub: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        jti: nanoid(),
-        sessionId,
-      },
-      {
-        secret:
-          this.configService.getOrThrow<AuthConfig>('jwt').accessToken.secret,
-        expiresIn:
-          this.configService.getOrThrow<AuthConfig>('jwt').accessToken
-            .expiresIn,
-      },
-    );
+    // 3. 새로운 세션 ID 생성
+    const newSessionId = nanoid();
 
-    return { accessToken };
+    // 4. 새로운 토큰 쌍 생성
+    const [newAccessToken, newRefreshToken] = await Promise.all([
+      this.generateAccessToken(user, newSessionId),
+      this.generateRefreshToken(user, newSessionId),
+    ]);
+
+    // 5. 기존 데이터 무효화 (개선된 부분)
+    await Promise.all([
+      this.redisService.delete(`refresh_token:${userId}:${oldSessionId}`),
+      this.redisService.set(
+        `token:lastUsed:${oldJti}`,
+        Date.now(),
+        refreshPayload.exp - Math.floor(Date.now() / 1000),
+      ),
+      this.redisService.removeSession(userId, oldSessionId), // 기존 세션 제거
+    ]);
+
+    // 6. 새로운 데이터 저장 (개선된 부분)
+    await Promise.all([
+      this.redisService.set(
+        `refresh_token:${userId}:${newSessionId}`,
+        newRefreshToken,
+        60 * 60 * 24 * 7,
+      ),
+      this.redisService.setUserSession(userId, newSessionId, 60 * 60 * 24 * 1), // 새 세션 등록
+    ]);
+
+    return ResponseBuilder.OK_WITH(
+      { accessToken: newAccessToken, refreshToken: newRefreshToken },
+      'Token refreshed successfully',
+    );
   }
 
-  async logout(userId: string, sessionId: string): Promise<void> {
+  async logout(
+    userId: string,
+    sessionId: string,
+  ): Promise<ResponseBuilder<string, string>> {
     await this.redisService.removeSession(userId, sessionId);
     await this.redisService.delete(`refresh_token:${userId}:${sessionId}`);
+
+    return ResponseBuilder.OK();
   }
 
-  async signup(user: SignUpDto): Promise<boolean> {
-    const existingUser = await this.userService.findUserByEmail(user.email);
+  async signup(signupDto: SignUpDto): Promise<ResponseBuilder<string, null>> {
+    const existingUser = await this.userService.findUserByEmail(
+      signupDto.email,
+    );
+
     if (existingUser) {
-      throw new UnauthorizedException('User already exists');
+      throw new UnauthorizedException(
+        ResponseBuilder.Error('User already exists', 'UNAUTHORIZED'),
+      );
     }
 
-    const newUser = await this.userService.createUser(user);
+    const newUser = await this.userService.createUser(signupDto);
+
     if (!newUser) {
-      throw new UnauthorizedException('User creation failed');
+      throw new UnauthorizedException(
+        ResponseBuilder.Error('User creation failed', 'UNAUTHORIZED'),
+      );
     }
 
-    return true;
+    return ResponseBuilder.OK_WITH('Signup successful', null);
+  }
+
+  async getProfile(
+    jwtPayload: JwtPayload,
+  ): Promise<ResponseBuilder<User, undefined>> {
+    if (!jwtPayload) {
+      throw new UnauthorizedException(
+        ResponseBuilder.Error('JWT payload not found', 'UNAUTHORIZED'),
+      );
+    }
+
+    const profileData = await this.userService.findUserById(jwtPayload.sub);
+
+    if (!profileData) {
+      throw new UnauthorizedException(
+        ResponseBuilder.Error('User not found', 'UNAUTHORIZED'),
+      );
+    }
+
+    return ResponseBuilder.OK_WITH(profileData);
   }
 }

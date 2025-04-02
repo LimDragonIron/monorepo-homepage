@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, Provider } from '@nestjs/common';
 import { PromotionbannerService } from './promotionbanner.service';
 import { PromotionbannerController } from './promotionbanner.controller';
 

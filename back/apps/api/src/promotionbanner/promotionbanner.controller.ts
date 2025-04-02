@@ -19,9 +19,11 @@ export class PromotionbannerController {
     private readonly promotionbannerService: PromotionbannerService,
   ) {}
 
-  @Get()
-  getAll() {
-    return this.promotionbannerService.findAll();
+  @Public()
+  @Get('/active')
+  async getActiveBanner() {
+    const result = await this.promotionbannerService.getActiveBanner();
+    return result;
   }
 
   @Get(':id')
@@ -29,12 +31,9 @@ export class PromotionbannerController {
     return this.promotionbannerService.findOne(Number(id));
   }
 
-  @Public()
-  @Get('/active')
-  async getActiveBanner() {
-    const active = await this.promotionbannerService.getActiveBanner();
-    if (!active) throw new NotFoundException('활성화된 배너 없음');
-    return active.banner;
+  @Get()
+  getAll() {
+    return this.promotionbannerService.findAll();
   }
 
   @Post()

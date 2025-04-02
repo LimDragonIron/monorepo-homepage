@@ -3,15 +3,18 @@ import {
   Catch,
   ArgumentsHost,
   HttpException,
+  Logger,
 } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { HttpErrorCode, prismaErrorMapping } from '../types';
 import { ResponseBuilder } from '../../common/response/response-builder';
 import { sanitizeError } from '../utils';
 import { Prisma } from '@prisma/client';
+import { instanceToPlain } from 'class-transformer';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
+  private logger = new Logger(GlobalExceptionFilter.name);
   constructor(private readonly httpAdapterHost: HttpAdapterHost) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
@@ -23,10 +26,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     httpAdapter.reply(
       ctx.getResponse(),
-      ResponseBuilder.Error(
-        sanitizedError.message,
-        sanitizedError.code,
-        sanitizedError.meta,
+      instanceToPlain(
+        ResponseBuilder.Error(
+          sanitizedError.message,
+          sanitizedError.code,
+          sanitizedError.meta,
+        ),
       ),
       sanitizedError.statusCode,
     );
@@ -48,6 +53,16 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     // NestJS 기본 오류
     if (exception instanceof HttpException) {
+      if (exception.getResponse()) {
+        const ex = exception.getResponse();
+        return {
+          statusCode: exception.getStatus(),
+          code: ex['_code'] || HttpErrorCode.INTERNAL_SERVER_ERROR,
+          message: ex['message'],
+          meta: ex['_meta'],
+        };
+      }
+
       return {
         statusCode: exception.getStatus(),
         code: exception['code'] || HttpErrorCode.INTERNAL_SERVER_ERROR,
