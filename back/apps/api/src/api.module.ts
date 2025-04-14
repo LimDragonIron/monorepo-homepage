@@ -7,9 +7,16 @@ import { UserModule } from './user/user.module';
 import { PromotionbannerModule } from './promotionbanner/promotionbanner.module';
 import { APP_FILTER } from '@nestjs/core';
 import { GlobalExceptionFilter } from 'libs/errors';
+import { FileuploadModule } from './fileupload/fileupload.module';
 
 @Module({
-  imports: [GlobalConfigModule, AuthModule, UserModule, PromotionbannerModule],
+  imports: [
+    GlobalConfigModule,
+    AuthModule,
+    UserModule,
+    PromotionbannerModule,
+    FileuploadModule,
+  ],
   controllers: [ApiController],
   providers: [
     ApiService,
